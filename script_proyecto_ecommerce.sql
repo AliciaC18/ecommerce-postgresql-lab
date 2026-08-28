@@ -112,12 +112,27 @@ CREATE TABLE detalle_pedidos (
     precio_unitario NUMERIC(10, 2) NOT NULL CHECK (precio_unitario > 0)
 );
 
+
 -- -----------------------------------------------------------------------------
--- 3. AUTOMATIZACIÓN (Función y Trigger para Control de Inventario)
+-- 3. AUTOMATIZACIÓN (Función con Validación y Trigger para Control de Inventario)
 -- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION actualizar_stock_producto()
+CREATE OR REPLACE FUNCTION validar_y_actualizar_stock()
 RETURNS TRIGGER AS $$
+DECLARE
+    stock_actual INT;
 BEGIN
+    -- Obtenemos el stock disponible del producto
+    SELECT stock INTO stock_actual
+    FROM productos
+    WHERE producto_id = NEW.producto_id;
+
+    -- Validación: Si la cantidad pedida supera el stock, frenamos la transacción
+    IF stock_actual < NEW.cantidad THEN
+        RAISE EXCEPTION 'Stock insuficiente para el producto ID %. Disponible: %, Solicitado: %', 
+            NEW.producto_id, stock_actual, NEW.cantidad;
+    END IF;
+
+    -- Si hay stock suficiente, realizamos el descuento
     UPDATE productos
     SET stock = stock - NEW.cantidad
     WHERE producto_id = NEW.producto_id;
@@ -126,10 +141,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trg_actualizar_stock
-AFTER INSERT ON detalle_pedidos
+-- Creamos el trigger ejecutable BEFORE INSERT para validar a tiempo
+DROP TRIGGER IF EXISTS trg_actualizar_stock ON detalle_pedidos;
+DROP TRIGGER IF EXISTS trg_validar_stock ON detalle_pedidos;
+
+CREATE TRIGGER trg_validar_stock
+BEFORE INSERT ON detalle_pedidos
 FOR EACH ROW
-EXECUTE FUNCTION actualizar_stock_producto();
+EXECUTE FUNCTION validar_y_actualizar_stock();
 
 -- -----------------------------------------------------------------------------
 -- 4. POBLADO DE DATOS (DML Inicial)
